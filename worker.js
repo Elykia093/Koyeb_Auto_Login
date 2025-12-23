@@ -17,9 +17,7 @@ async function sendTGMessage(message, env) {
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
 
@@ -27,7 +25,7 @@ async function sendTGMessage(message, env) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    
+
     console.info("✅ Telegram 消息发送成功");
     return await response.json();
   } catch (e) {
@@ -36,47 +34,35 @@ async function sendTGMessage(message, env) {
   }
 }
 
-async function loginKoyeb(email, password) {
-  if (!email || !password) {
-    return [false, "邮箱或密码为空"];
+async function loginKoyeb(email, token) {
+  if (!token) {
+    return [false, "Token 为空"];
   }
 
-  const loginUrl = 'https://app.koyeb.com/v1/account/login';
+  const url = 'https://app.koyeb.com/v1/apps';
   const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Authorization': `Bearer ${token.trim()}`,
+    'Accept': 'application/json',
+    'User-Agent': 'KoyebTokenLogin/1.0',
   };
-  const data = { email: email.trim(), password };
 
   try {
     const controller = new AbortController();
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => {
-        controller.abort();
-        reject(new Error("请求超时"));
-      }, 30000)
-    );
+    const timeout = setTimeout(() => controller.abort(), 30000);
 
-    const fetchPromise = fetch(loginUrl, {
-      method: 'POST',
+    const response = await fetch(url, {
+      method: 'GET',
       headers,
-      body: JSON.stringify(data),
       signal: controller.signal,
     });
 
-    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    clearTimeout(timeout);
 
     if (!response.ok) {
-      let errorMsg = `HTTP状态码 ${response.status}`;
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const errorData = await response.json();
-        errorMsg += ` - ${errorData.message || JSON.stringify(errorData)}`;
-      }
-      return [false, errorMsg];
+      return [false, `HTTP ${response.status}`];
     }
 
-    return [true, "登录成功"];
+    return [true, "登录成功（Token）"];
   } catch (e) {
     return [false, e.message];
   }
@@ -109,11 +95,12 @@ async function scheduledEventHandler(event, env) {
 
     for (let index = 0; index < totalAccounts; index++) {
       const account = KOYEB_ACCOUNTS[index];
-      const email = account.email?.trim();
-      const password = account.password;
+      const email = account.email?.trim() || "未命名账号";
+      const token = account.token;
 
-      if (!email || !password) {
-        console.warn(`⚠️ 账户信息不完整，跳过: ${email}`);
+      if (!token) {
+        console.warn(`⚠️ 账户未配置 Token，跳过: ${email}`);
+        results.push(`⚠️ 账户: ${email}\nToken 未配置，跳过\n`);
         continue;
       }
 
@@ -123,10 +110,10 @@ async function scheduledEventHandler(event, env) {
           await new Promise(resolve => setTimeout(resolve, 5000)); // 5秒间隔
         }
 
-        const [success, message] = await loginKoyeb(email, password);
+        const [success, message] = await loginKoyeb(email, token);
         if (success) {
           successCount++;
-          results.push(`✅ 账户: ${email} 登录成功\n`);
+          results.push(`✅ 账户: ${email} 登录成功（Token）\n`);
         } else {
           results.push(`❌ 账户: ${email} 登录失败 - ${message}\n`);
         }
